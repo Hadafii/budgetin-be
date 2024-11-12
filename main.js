@@ -10,9 +10,9 @@ app.use(express.json());
 
 const database = mysql.createConnection({
     host: "127.0.0.1",
-    user: "root",
-    password: "",
-    database: "dataweb"
+    user: "dafiutom_admin",
+    password: "BudgetinDB6623~;#m12,PZB{{/?&*8c5K",
+    database: "dafiutom_BudgetinDB"
 });
 
 database.connect((err) => {
@@ -20,7 +20,7 @@ database.connect((err) => {
     console.log("Database connected");
 });
 
-app.get("/hello", (req, res) => {
+app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "hello.html"));
 });
 // Secret key untuk JWT
@@ -175,9 +175,24 @@ app.get("/GatewayApi/v1/allUsernames", (req, res) => {
     });
 });
 
+app.get("/GatewayApi/v1/getUserBalance", authenticateToken, (req, res) => {
+    const userId = req.user.id; // Extract user ID from the JWT token
+
+    const query = "SELECT balance FROM accounts WHERE user_id = ?";
+    database.query(query, [userId], (err, rows) => {
+        if (err) {
+            console.error("Database error:", err);
+            res.status(500).json({ success: false, message: "Database error" });
+        } else if (rows.length > 0) {
+            res.json({ success: true, balance: rows[0].balance });
+        } else {
+            res.json({ success: false, message: "Account not found" });
+        }
+    });
+});
 
 
 
-app.listen(3001, () => {
+app.listen(62542, () => {
     console.log("Server is running on port 3001");
 });
