@@ -4,7 +4,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer"); 
+const nodemailer = require("nodemailer");
 const validator = require("validator");
 const bcrypt = require("bcrypt");
 const util = require("util");
@@ -15,21 +15,24 @@ app.use(cors());
 app.use(express.json());
 
 //Connect to server
-const database = mysql.createConnection({
+const database = mysql.createPool({
     host: "127.0.0.1",
     user: "dafiutom_admin",
     password: "BudgetinDB6623~;#m12,PZB{{/?&*8c5K",
-    database: "dafiutom_BudgetinDB"
+    database: "dafiutom_BudgetinDB",
+    connectionLimit: 10, // Jumlah maksimal koneksi di pool
 });
 
+// Gunakan pool.query untuk semua operasi
 const query = util.promisify(database.query).bind(database);
 //connect attempt
-database.connect((err) => {
-    if (err) {
-        console.error("error connecting:", err);
+database.on("error", (err) => {
+    console.error("Unexpected error on database connection:", err);
+    if (err.code === "PROTOCOL_CONNECTION_LOST") {
+        console.error("Database connection lost. Reconnecting...");
     }
-    console.log("Database connected");
 });
+
 
 //Page Landing
 app.get("/", (req, res) => {
@@ -40,15 +43,15 @@ app.get("/", (req, res) => {
 const transporter = nodemailer.createTransport({
     service: "Gmail",
     auth: {
-        user: "budgetinmailer@gmail.com", 
-        pass: "amoy bbws ltub ynrv"   
+        user: "budgetinmailer@gmail.com",
+        pass: "amoy bbws ltub ynrv"
     },
     // debug: true, // Menyalakan debugging
     // logger: true  // Menyalakan logging
 });
 
 // Secret key untuk JWT
-const JWT_SECRET = "1n1_KuNc1-T0K3N-MAM_APPLICATION_IPPL_AsoyGeboy"; 
+const JWT_SECRET = "1n1_KuNc1-T0K3N-MAM_APPLICATION_IPPL_AsoyGeboy";
 
 
 // Endpoint login yang menghasilkan token
@@ -105,7 +108,7 @@ function authenticateToken(req, res, next) {
             console.error("Token verification error:", err);
             return res.status(403).json({ message: "Invalid token" });
         }
-        
+
         req.user = user;
         next();
     });
@@ -140,7 +143,7 @@ app.post("/GatewayApi/v1/refreshToken", authenticateToken, (req, res) => {
 // Endpoint untuk mendapatkan data pengguna berdasarkan token
 app.get("/GatewayApi/v1/users", authenticateToken, (req, res) => {
     const userId = req.user.id;
-    const query = "SELECT * FROM users WHERE user_id = ?"; 
+    const query = "SELECT * FROM users WHERE user_id = ?";
     database.query(query, [userId], (err, rows) => {
         if (err) {
             console.error("Database error:", err);
@@ -161,7 +164,7 @@ app.get("/GatewayApi/v1/AccountName", authenticateToken, (req, res) => {
             console.error("Database error:", err);
             res.status(500).json({ success: false, message: "Database error" });
         } else if (rows.length > 0) {
-            console.log("Account Name:", rows[0].account_name); 
+            console.log("Account Name:", rows[0].account_name);
             res.json({ success: true, account_name: rows[0].account_name });
         } else {
             console.log("Account not found for user ID:", userId);
@@ -798,7 +801,7 @@ app.put("/GatewayApi/v1/updateUserOccupation", authenticateToken, (req, res) => 
             console.error("Database error:", err);
             return res.status(500).json({ success: false, message: "Database error" });
         }
-        
+
         if (result.affectedRows > 0) {
             res.json({ success: true, message: "Occupation updated successfully" });
         } else {
@@ -822,7 +825,7 @@ app.get("/GatewayApi/v1/getBudgetStatus", authenticateToken, (req, res) => {
         WHERE account_id = (SELECT account_id FROM accounts WHERE user_id = ?) 
         AND month = ?
     `;
-    
+
     database.query(queryMonthlyBudget, [userId, currentMonth], (err, rows) => {
         if (err) {
             console.error("Error fetching monthly budget:", err);
@@ -844,7 +847,7 @@ app.get("/GatewayApi/v1/getBudgetStatus", authenticateToken, (req, res) => {
             JOIN spendingcategories sc ON bd.category_id = sc.category_id
             WHERE bd.budget_id = ? AND bd.category_id IN (1, 2)
         `;
-        
+
         database.query(queryBudgetDetails, [budget_id], (err, budgetRows) => {
             if (err) {
                 console.error("Error fetching budget details:", err);
@@ -859,7 +862,7 @@ app.get("/GatewayApi/v1/getBudgetStatus", authenticateToken, (req, res) => {
                 FROM budgetdetails 
                 WHERE budget_id = ? AND category_id NOT IN (1, 2)
             `;
-            
+
             database.query(queryOtherCategories, [budget_id], (err, otherCategoriesRows) => {
                 if (err) {
                     console.error("Error fetching 'Other' categories:", err);
@@ -880,7 +883,7 @@ app.get("/GatewayApi/v1/getBudgetStatus", authenticateToken, (req, res) => {
                     AND DATE_FORMAT(transaction_date, '%Y-%m') = ?
                     GROUP BY spending_category_id;
                 `;
-                
+
                 database.query(queryExpenses, [userId, currentMonth], (err, expenseRows) => {
                     if (err) {
                         console.error("Error fetching expenses:", err);
@@ -914,7 +917,7 @@ app.get("/GatewayApi/v1/getBudgetStatus", authenticateToken, (req, res) => {
                             AND DATE_FORMAT(transaction_date, '%Y-%m') = ?
                             AND spending_category_id IN (${otherCategoryIds.map(() => '?').join(',')})
                         `;
-                        
+
                         database.query(queryOtherExpenses, [userId, currentMonth, ...otherCategoryIds], (err, otherExpenseRows) => {
                             if (err) {
                                 console.error("Error fetching 'Other' expenses:", err);
@@ -959,7 +962,7 @@ app.get("/GatewayApi/v1/getAllBudgetStatus", authenticateToken, (req, res) => {
         WHERE account_id = (SELECT account_id FROM accounts WHERE user_id = ?) 
         AND month = ?
     `;
-    
+
     database.query(queryMonthlyBudget, [userId, currentMonth], (err, rows) => {
         if (err) {
             console.error("Error fetching monthly budget:", err);
@@ -980,7 +983,7 @@ app.get("/GatewayApi/v1/getAllBudgetStatus", authenticateToken, (req, res) => {
             JOIN spendingcategories sc ON bd.category_id = sc.category_id
             WHERE bd.budget_id = ?
         `;
-        
+
         database.query(queryBudgetDetails, [budget_id], (err, budgetRows) => {
             if (err) {
                 console.error("Error fetching budget details:", err);
@@ -997,7 +1000,7 @@ app.get("/GatewayApi/v1/getAllBudgetStatus", authenticateToken, (req, res) => {
                 AND type = 'spending'
                 AND DATE_FORMAT(transaction_date, '%Y-%m') = ?
             `;
-            
+
             database.query(queryTotalExpenses, [userId, currentMonth], (err, totalExpensesRow) => {
                 if (err) {
                     console.error("Error fetching total expenses:", err);
@@ -1016,7 +1019,7 @@ app.get("/GatewayApi/v1/getAllBudgetStatus", authenticateToken, (req, res) => {
                     AND DATE_FORMAT(transaction_date, '%Y-%m') = ?
                     GROUP BY spending_category_id;
                 `;
-                
+
                 database.query(queryExpenses, [userId, currentMonth], (err, expenseRows) => {
                     if (err) {
                         console.error("Error fetching expenses:", err);
@@ -1689,75 +1692,75 @@ app.get("/GatewayApi/v1/getCategories", authenticateToken, async (req, res) => {
 
 app.post("/GatewayApi/v1/replaceBudgetDetails", authenticateToken, (req, res) => {
     const { budget_id, details } = req.body;
-  
+
     if (!budget_id || !Array.isArray(details) || details.length === 0) {
-      return res.status(400).json({ success: false, message: "No details provided" });
+        return res.status(400).json({ success: false, message: "No details provided" });
     }
-  
+
     database.beginTransaction((err) => {
-      if (err) {
-        console.error("Transaction start error:", err);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
-      }
-  
-      // Step 1: Delete existing budget details
-      const deleteQuery = "DELETE FROM budgetdetails WHERE budget_id = ?";
-      database.query(deleteQuery, [budget_id], (deleteErr) => {
-        if (deleteErr) {
-          console.error("Delete error:", deleteErr);
-          return database.rollback(() => {
-            res.status(500).json({ success: false, message: "Internal Server Error" });
-          });
+        if (err) {
+            console.error("Transaction start error:", err);
+            return res.status(500).json({ success: false, message: "Internal Server Error" });
         }
-  
-        // Step 2: Insert new budget details
-        const insertQuery = `
+
+        // Step 1: Delete existing budget details
+        const deleteQuery = "DELETE FROM budgetdetails WHERE budget_id = ?";
+        database.query(deleteQuery, [budget_id], (deleteErr) => {
+            if (deleteErr) {
+                console.error("Delete error:", deleteErr);
+                return database.rollback(() => {
+                    res.status(500).json({ success: false, message: "Internal Server Error" });
+                });
+            }
+
+            // Step 2: Insert new budget details
+            const insertQuery = `
           INSERT INTO budgetdetails (budget_id, category_id, category_budget, created_at)
           VALUES (?, ?, ?, NOW())
         `;
-  
-        const insertPromises = details.map((detail) => {
-          const { category_id, category_budget } = detail;
-  
-          // Validation
-          if (!category_id || !category_budget || category_budget <= 0) {
-            return Promise.reject(new Error("Invalid detail data"));
-          }
-  
-          return new Promise((resolve, reject) => {
-            database.query(insertQuery, [budget_id, category_id, category_budget], (insertErr) => {
-              if (insertErr) {
-                reject(insertErr);
-              } else {
-                resolve();
-              }
-            });
-          });
-        });
-  
-        // Handle all insertions
-        Promise.all(insertPromises)
-          .then(() => {
-            database.commit((commitErr) => {
-              if (commitErr) {
-                console.error("Commit error:", commitErr);
-                return database.rollback(() => {
-                  res.status(500).json({ success: false, message: "Internal Server Error" });
+
+            const insertPromises = details.map((detail) => {
+                const { category_id, category_budget } = detail;
+
+                // Validation
+                if (!category_id || !category_budget || category_budget <= 0) {
+                    return Promise.reject(new Error("Invalid detail data"));
+                }
+
+                return new Promise((resolve, reject) => {
+                    database.query(insertQuery, [budget_id, category_id, category_budget], (insertErr) => {
+                        if (insertErr) {
+                            reject(insertErr);
+                        } else {
+                            resolve();
+                        }
+                    });
                 });
-              }
-  
-              res.json({ success: true, message: "Budget details replaced successfully" });
             });
-          })
-          .catch((insertErr) => {
-            console.error("Insert error:", insertErr);
-            database.rollback(() => {
-              res.status(500).json({ success: false, message: "Internal Server Error" });
-            });
-          });
-      });
+
+            // Handle all insertions
+            Promise.all(insertPromises)
+                .then(() => {
+                    database.commit((commitErr) => {
+                        if (commitErr) {
+                            console.error("Commit error:", commitErr);
+                            return database.rollback(() => {
+                                res.status(500).json({ success: false, message: "Internal Server Error" });
+                            });
+                        }
+
+                        res.json({ success: true, message: "Budget details replaced successfully" });
+                    });
+                })
+                .catch((insertErr) => {
+                    console.error("Insert error:", insertErr);
+                    database.rollback(() => {
+                        res.status(500).json({ success: false, message: "Internal Server Error" });
+                    });
+                });
+        });
     });
-  });
+});
 
 
 //ENPOINT Notifikasi
@@ -1828,48 +1831,48 @@ app.get("/GatewayApi/v1/getnotificationsLimit", authenticateToken, (req, res) =>
       FROM notifications
       WHERE user_id = ?;
     `;
-  
+
     database.query(query, [userId], (err, rows) => {
-      if (err) {
-        console.error("Database error:", err.message);
-        return res.status(500).json({
-          success: false,
-          message: "Gagal mengambil notifikasi. Silakan coba lagi nanti.",
-        });
-      }
-  
-      database.query(countQuery, [userId], (errCount, countResult) => {
-        if (errCount) {
-          console.error("Database error:", errCount.message);
-          return res.status(500).json({
-            success: false,
-            message: "Gagal menghitung notifikasi.",
-          });
+        if (err) {
+            console.error("Database error:", err.message);
+            return res.status(500).json({
+                success: false,
+                message: "Gagal mengambil notifikasi. Silakan coba lagi nanti.",
+            });
         }
-  
-        const totalNotifications = countResult[0].total;
-  
-        // Cek jika tidak ada notifikasi
-        if (rows.length === 0) {
-          return res.status(404).json({
-            success: true,
-            message: "Tidak ada notifikasi ditemukan.",
-            data: [],
-            totalNotifications: totalNotifications,
-          });
-        }
-  
-        // Kembalikan notifikasi
-        res.status(200).json({
-          success: true,
-          message: "Notifikasi berhasil diambil.",
-          data: rows,
-          totalNotifications: totalNotifications,
+
+        database.query(countQuery, [userId], (errCount, countResult) => {
+            if (errCount) {
+                console.error("Database error:", errCount.message);
+                return res.status(500).json({
+                    success: false,
+                    message: "Gagal menghitung notifikasi.",
+                });
+            }
+
+            const totalNotifications = countResult[0].total;
+
+            // Cek jika tidak ada notifikasi
+            if (rows.length === 0) {
+                return res.status(404).json({
+                    success: true,
+                    message: "Tidak ada notifikasi ditemukan.",
+                    data: [],
+                    totalNotifications: totalNotifications,
+                });
+            }
+
+            // Kembalikan notifikasi
+            res.status(200).json({
+                success: true,
+                message: "Notifikasi berhasil diambil.",
+                data: rows,
+                totalNotifications: totalNotifications,
+            });
         });
-      });
     });
-  });
-  
+});
+
 
 //Read notif
 app.post('/GatewayApi/v1/markAsRead/:notificationId', authenticateToken, async (req, res) => {
@@ -1908,19 +1911,19 @@ app.post("/GatewayApi/v1/markAllAsRead", authenticateToken, async (req, res) => 
     try {
         const userId = req.user.id;
         const result = await database.query(
-        `UPDATE notifications SET is_read = 1 WHERE user_id = ?`,
-        [userId]
+            `UPDATE notifications SET is_read = 1 WHERE user_id = ?`,
+            [userId]
         );
 
         res.status(200).json({
             success: true,
             message: "Semua notifikasi berhasil ditandai sebagai dibaca.",
         });
-        } catch (err) {
+    } catch (err) {
         console.error("Error marking all notifications as read:", err.message);
         res.status(500).json({
-        success: false,
-        message: "Terjadi kesalahan pada server.",
+            success: false,
+            message: "Terjadi kesalahan pada server.",
         });
     }
 });
@@ -2214,7 +2217,7 @@ app.post("/GatewayApi/v1/postAllNotifications", authenticateToken, (req, res) =>
             }
             if (joinRows.length > 0) {
                 newNotifications.push([
-                    welcome_$,{userId},
+                    welcome_$, { userId },
                     userId,
                     "Selamat bergabung di Budgetin! Semoga Anda dapat mengeksplorasi transaksi Anda dengan nyaman.",
                     new Date(),
