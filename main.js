@@ -18,7 +18,7 @@ app.use(express.json());
 const database = mysql.createPool({
     host: "127.0.0.1",
     user: "dafiutom_admin",
-    password: "BudgetinDB6623~;#m12,PZB{{/?&*8c5K",
+    password: "##############",
     database: "dafiutom_BudgetinDB",
     connectionLimit: 10, // Jumlah maksimal koneksi di pool
 });
@@ -378,119 +378,132 @@ app.post("/GatewayApi/v1/verifyEmail", (req, res) => {
         return res.status(400).json({ success: false, message: "Invalid email format." });
     }
 
-    database.beginTransaction((err) => {
+    database.getConnection((err, connection) => {
         if (err) {
-            console.error("Transaction start error:", err);
+            console.error("Connection error:", err);
             return res.status(500).json({ success: false, message: "Internal Server Error" });
         }
 
-        // Step 1: Validate OTP
-        const otpQuery = `
-            SELECT * FROM temp_registrations 
-            WHERE email = ? AND otp_code = ? AND expire_at > NOW()
-        `;
-        database.query(otpQuery, [email, otp], (otpErr, otpRows) => {
-            if (otpErr) {
-                console.error("OTP validation error:", otpErr);
-                return database.rollback(() => {
-                    res.status(500).json({ success: false, message: "Internal Server Error" });
-                });
+        connection.beginTransaction((err) => {
+            if (err) {
+                console.error("Transaction start error:", err);
+                connection.release();
+                return res.status(500).json({ success: false, message: "Internal Server Error" });
             }
 
-            if (otpRows.length === 0) {
-                return database.rollback(() => {
-                    res.status(400).json({ success: false, message: "Invalid or expired OTP." });
-                });
-            }
+            const otpQuery = `
+                SELECT * FROM temp_registrations 
+                WHERE email = ? AND otp_code = ? AND expire_at > NOW()
+            `;
 
-            const { username, password, account_name, birth_date, gender, role } = otpRows[0];
-
-            // Step 2: Map role to occupation_id
-            const roleQuery = "SELECT occupation_id FROM occupations WHERE occupation_name = ?";
-            database.query(roleQuery, [role], (roleErr, roleRows) => {
-                if (roleErr || roleRows.length === 0) {
-                    console.error("Role mapping error:", roleErr);
-                    return database.rollback(() => {
+            connection.query(otpQuery, [email, otp], (otpErr, otpRows) => {
+                if (otpErr) {
+                    console.error("OTP validation error:", otpErr);
+                    return connection.rollback(() => {
+                        connection.release();
                         res.status(500).json({ success: false, message: "Internal Server Error" });
                     });
                 }
 
-                const occupation_id = roleRows[0].occupation_id;
+                if (otpRows.length === 0) {
+                    return connection.rollback(() => {
+                        connection.release();
+                        res.status(400).json({ success: false, message: "Invalid or expired OTP." });
+                    });
+                }
 
-                // Step 3: Insert user into `users`
-                const userQuery = `
-                    INSERT INTO users (username, password, email, is_verified, is_hashed) 
-                    VALUES (?, ?, ?, TRUE, TRUE)
-                `;
-                database.query(userQuery, [username, password, email], (userErr, userResult) => {
-                    if (userErr) {
-                        console.error("User creation error:", userErr);
-                        return database.rollback(() => {
+                const { username, password, account_name, birth_date, gender, role } = otpRows[0];
+
+                const roleQuery = "SELECT occupation_id FROM occupations WHERE occupation_name = ?";
+                connection.query(roleQuery, [role], (roleErr, roleRows) => {
+                    if (roleErr || roleRows.length === 0) {
+                        console.error("Role mapping error:", roleErr);
+                        return connection.rollback(() => {
+                            connection.release();
                             res.status(500).json({ success: false, message: "Internal Server Error" });
                         });
                     }
 
-                    const userId = userResult.insertId;
+                    const occupation_id = roleRows[0].occupation_id;
 
-                    // Step 4: Insert account into `accounts`
-                    const accountQuery = `
-                        INSERT INTO accounts (user_id, account_name, birth_date, gender, occupation_id)
-                        VALUES (?, ?, ?, ?, ?)
+                    const userQuery = `
+                        INSERT INTO users (username, password, email, is_verified, is_hashed) 
+                        VALUES (?, ?, ?, TRUE, TRUE)
                     `;
-                    database.query(accountQuery, [userId, account_name, birth_date, gender, occupation_id], (accountErr) => {
-                        if (accountErr) {
-                            console.error("Account creation error:", accountErr);
-                            return database.rollback(() => {
+
+                    connection.query(userQuery, [username, password, email], (userErr, userResult) => {
+                        if (userErr) {
+                            console.error("User creation error:", userErr);
+                            return connection.rollback(() => {
+                                connection.release();
                                 res.status(500).json({ success: false, message: "Internal Server Error" });
                             });
                         }
 
-                        // Step 5: Add welcome notification
-                        const welcomeMessage = "Selamat datang di Budgetin! Nikmati fitur kami untuk mengelola keuangan Anda.";
-                        const notificationContext = "welcome-message";
-                        const notificationQuery = `
-                            INSERT INTO notifications (user_id, message, created_at, is_read, notification_context)
-                            SELECT ?, ?, NOW(), 0, ?
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM notifications WHERE user_id = ? AND notification_context = ?
-                            )
+                        const userId = userResult.insertId;
+
+                        const accountQuery = `
+                            INSERT INTO accounts (user_id, account_name, birth_date, gender, occupation_id)
+                            VALUES (?, ?, ?, ?, ?)
                         `;
-                        database.query(notificationQuery, [
-                            userId, welcomeMessage, notificationContext, userId, notificationContext
-                        ], (notificationErr) => {
-                            if (notificationErr) {
-                                console.error("Notification creation error:", notificationErr);
-                                return database.rollback(() => {
+
+                        connection.query(accountQuery, [userId, account_name, birth_date, gender, occupation_id], (accountErr) => {
+                            if (accountErr) {
+                                console.error("Account creation error:", accountErr);
+                                return connection.rollback(() => {
+                                    connection.release();
                                     res.status(500).json({ success: false, message: "Internal Server Error" });
                                 });
                             }
 
-                            // Step 6: Delete from `temp_registrations`
-                            const deleteTempQuery = "DELETE FROM temp_registrations WHERE email = ?";
-                            database.query(deleteTempQuery, [email], (deleteErr) => {
-                                if (deleteErr) {
-                                    console.error("Temp registrations delete error:", deleteErr);
-                                    return database.rollback(() => {
+                            const welcomeMessage = "Selamat datang di Budgetin! Nikmati fitur kami untuk mengelola keuangan Anda.";
+                            const notificationContext = "welcome-message";
+                            const notificationQuery = `
+                                INSERT INTO notifications (user_id, message, created_at, is_read, notification_context)
+                                SELECT ?, ?, NOW(), 0, ?
+                                WHERE NOT EXISTS (
+                                    SELECT 1 FROM notifications WHERE user_id = ? AND notification_context = ?
+                                )
+                            `;
+
+                            connection.query(notificationQuery, [
+                                userId, welcomeMessage, notificationContext, userId, notificationContext
+                            ], (notificationErr) => {
+                                if (notificationErr) {
+                                    console.error("Notification creation error:", notificationErr);
+                                    return connection.rollback(() => {
+                                        connection.release();
                                         res.status(500).json({ success: false, message: "Internal Server Error" });
                                     });
                                 }
 
-                                // Commit the transaction
-                                database.commit((commitErr) => {
-                                    if (commitErr) {
-                                        console.error("Transaction commit error:", commitErr);
-                                        return database.rollback(() => {
+                                const deleteTempQuery = "DELETE FROM temp_registrations WHERE email = ?";
+                                connection.query(deleteTempQuery, [email], (deleteErr) => {
+                                    if (deleteErr) {
+                                        console.error("Temp registrations delete error:", deleteErr);
+                                        return connection.rollback(() => {
+                                            connection.release();
                                             res.status(500).json({ success: false, message: "Internal Server Error" });
                                         });
                                     }
 
-                                    // Generate JWT token
-                                    const token = jwt.sign({ id: userId, email }, JWT_SECRET, { expiresIn: "1h" });
+                                    connection.commit((commitErr) => {
+                                        if (commitErr) {
+                                            console.error("Transaction commit error:", commitErr);
+                                            return connection.rollback(() => {
+                                                connection.release();
+                                                res.status(500).json({ success: false, message: "Internal Server Error" });
+                                            });
+                                        }
 
-                                    res.json({
-                                        success: true,
-                                        message: "Email verified and account created successfully",
-                                        token, // Send token to the frontend
+                                        const token = jwt.sign({ id: userId, email }, JWT_SECRET, { expiresIn: "1h" });
+
+                                        connection.release();
+                                        res.json({
+                                            success: true,
+                                            message: "Email verified and account created successfully",
+                                            token,
+                                        });
                                     });
                                 });
                             });
@@ -501,6 +514,7 @@ app.post("/GatewayApi/v1/verifyEmail", (req, res) => {
         });
     });
 });
+
 
 
 
@@ -1697,70 +1711,81 @@ app.post("/GatewayApi/v1/replaceBudgetDetails", authenticateToken, (req, res) =>
         return res.status(400).json({ success: false, message: "No details provided" });
     }
 
-    database.beginTransaction((err) => {
+    database.getConnection((err, connection) => {
         if (err) {
-            console.error("Transaction start error:", err);
+            console.error("Connection error:", err);
             return res.status(500).json({ success: false, message: "Internal Server Error" });
         }
 
-        // Step 1: Delete existing budget details
-        const deleteQuery = "DELETE FROM budgetdetails WHERE budget_id = ?";
-        database.query(deleteQuery, [budget_id], (deleteErr) => {
-            if (deleteErr) {
-                console.error("Delete error:", deleteErr);
-                return database.rollback(() => {
-                    res.status(500).json({ success: false, message: "Internal Server Error" });
-                });
+        connection.beginTransaction((err) => {
+            if (err) {
+                console.error("Transaction start error:", err);
+                connection.release();
+                return res.status(500).json({ success: false, message: "Internal Server Error" });
             }
 
-            // Step 2: Insert new budget details
-            const insertQuery = `
-          INSERT INTO budgetdetails (budget_id, category_id, category_budget, created_at)
-          VALUES (?, ?, ?, NOW())
-        `;
-
-            const insertPromises = details.map((detail) => {
-                const { category_id, category_budget } = detail;
-
-                // Validation
-                if (!category_id || !category_budget || category_budget <= 0) {
-                    return Promise.reject(new Error("Invalid detail data"));
-                }
-
-                return new Promise((resolve, reject) => {
-                    database.query(insertQuery, [budget_id, category_id, category_budget], (insertErr) => {
-                        if (insertErr) {
-                            reject(insertErr);
-                        } else {
-                            resolve();
-                        }
-                    });
-                });
-            });
-
-            // Handle all insertions
-            Promise.all(insertPromises)
-                .then(() => {
-                    database.commit((commitErr) => {
-                        if (commitErr) {
-                            console.error("Commit error:", commitErr);
-                            return database.rollback(() => {
-                                res.status(500).json({ success: false, message: "Internal Server Error" });
-                            });
-                        }
-
-                        res.json({ success: true, message: "Budget details replaced successfully" });
-                    });
-                })
-                .catch((insertErr) => {
-                    console.error("Insert error:", insertErr);
-                    database.rollback(() => {
+            // Step 1: Delete existing budget details
+            const deleteQuery = "DELETE FROM budgetdetails WHERE budget_id = ?";
+            connection.query(deleteQuery, [budget_id], (deleteErr) => {
+                if (deleteErr) {
+                    console.error("Delete error:", deleteErr);
+                    return connection.rollback(() => {
+                        connection.release();
                         res.status(500).json({ success: false, message: "Internal Server Error" });
                     });
+                }
+
+                // Step 2: Insert new budget details
+                const insertQuery = `
+                  INSERT INTO budgetdetails (budget_id, category_id, category_budget, created_at)
+                  VALUES (?, ?, ?, NOW())
+                `;
+
+                const insertPromises = details.map((detail) => {
+                    const { category_id, category_budget } = detail;
+
+                    if (!category_id || !category_budget || category_budget <= 0) {
+                        return Promise.reject(new Error("Invalid detail data"));
+                    }
+
+                    return new Promise((resolve, reject) => {
+                        connection.query(insertQuery, [budget_id, category_id, category_budget], (insertErr) => {
+                            if (insertErr) {
+                                reject(insertErr);
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
                 });
+
+                Promise.all(insertPromises)
+                    .then(() => {
+                        connection.commit((commitErr) => {
+                            if (commitErr) {
+                                console.error("Commit error:", commitErr);
+                                return connection.rollback(() => {
+                                    connection.release();
+                                    res.status(500).json({ success: false, message: "Internal Server Error" });
+                                });
+                            }
+
+                            connection.release();
+                            res.json({ success: true, message: "Budget details replaced successfully" });
+                        });
+                    })
+                    .catch((insertErr) => {
+                        console.error("Insert error:", insertErr);
+                        connection.rollback(() => {
+                            connection.release();
+                            res.status(500).json({ success: false, message: "Internal Server Error" });
+                        });
+                    });
+            });
         });
     });
 });
+
 
 
 //ENPOINT Notifikasi
